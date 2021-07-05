@@ -1,0 +1,1 @@
+from .anki_main import AnkiInput
