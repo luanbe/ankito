@@ -4,38 +4,27 @@ import requests
 import traceback
 import sys
 import logging
-from logging.handlers import RotatingFileHandler
+from dotenv import dotenv_values
 
+from logging.handlers import RotatingFileHandler
 from .utils import check_and_create_file
 from bs4 import BeautifulSoup
 from googletrans import Translator
 from functools import wraps
 
 
-def logit(func):
-    @wraps(func)
-    def wapper_logit(*args, **kwargs):
-        # An action before run function
-        logger.info(f'The {func.__name__} is starting....')
-        func_ = func(*args, **kwargs)
-        # An action after run fucntion
-        logger.info(f'The {func.__name__} is done!')
-        return func_
-    return wapper_logit
+
     
 class AnkiInput:
     keyword = None
-    google_api_key = 'AIzaSyCPT3YXtkrE3spo5RDccEZM2mSL1FEPYys'
-    google_project_cx = '78d33552ca5573b9d'
+    image_allow = True
+    config = dotenv_values('.env')
     add_note_action = 'addNote'
     find_note_action = 'findNotes'
     create_deck_action = 'createDeck'
+    anki_api = 'http://' + config.get('ANKI_API_HOST') + ':' + config.get('ANKI_API_PORT')
 
-    def __init__(self, deck_name, model_name, image_allow=True, debug=True):
-        self.deck_name = deck_name
-        self.model_name = model_name
-        self.image_allow = image_allow
-        self.debug = debug
+    def __init__(self):
         self.logger = self.get_logger('Anki')
         self.session = requests.Session()
         self.session.headers = {
@@ -45,72 +34,87 @@ class AnkiInput:
     def __str__(self):
         print("The AnkiInput Class")
 
+    def logit(func):
+        @wraps(func)
+        def wapper_logit(self, *args, **kwargs):
+            # An action before run function
+            self.logger.info(f'The {func.__name__} is starting....')
+            func_ = func(self, *args, **kwargs)
+            # An action after run fucntion
+            self.logger.info(f'The {func.__name__} is done!')
+            return func_
+        return wapper_logit
+
+
     @logit
-    def send_to_anki(self):
+    def words_to_anki(self, keyword, deck_name, model_name, image_allow=True, ):
         """Send data to anki
 
         Returns:
             json: return a json result or None
         """
-        self.deck_check_and_add()
-        note_status = self.find_note()
-        if not note_status:
-            oxford = self.oxforddictionaries()
-            full_vi = self.tracau_vn()
-            if oxford and full_vi:
-                # Convert random keyword to _
-                # Example: table = __b__
-                suggestion = ''
-                import random
-                i = 0
-                rand_number = random.randrange(len(self.keyword[1:-1]))
-                for w in self.keyword[1:-1]:
-                    if  rand_number == i:
-                        suggestion += w
-                    else:
-                        suggestion += '_'
-                    i += 1
-                
-                # Create a cloze for anki
-                definition = oxford['definition']
-                example = oxford['example']
-                cloze = '{{c1::cloze}}'.replace('cloze', self.keyword)
-                suggestion = f'_{suggestion}_'
-                if example:
-                    explanation = f'{definition}<br/>→ {example}'.lower().replace(self.keyword, cloze)
-                else:
-                    explanation = f'{definition}'.lower().replace(self.keyword, cloze)
-                
-                return self.invoke(self.add_note_action, note=self.note_template(
-                    self.deck_name,
-                    self.model_name,
-                    self.keyword,
-                    self.g_translate(),
-                    oxford['ipa'],
-                    suggestion,
-                    explanation,
-                    full_vi,
-                    oxford['audio'],
-                    self.image_search()
-                    ))
-        else:
-            self.logger.info(f'Keyword: {self.keyword}| is existing in {self.deck_name} deck')
-            return True
+        self.image_allow = image_allow
+        self.keyword = keyword
+        self.deck_check_and_add(deck_name)
+        # note_status = self.find_note(deck_name)
 
-    def deck_check_and_add(self):
-        query = f'"deck:{self.deck_name}"'
+        # if not note_status:
+        #     oxford = self.oxforddictionaries()
+        #     full_vi = self.tracau_vn()
+        #     if oxford and full_vi:
+        #         # Convert random keyword to _
+        #         # Example: table = __b__
+        #         suggestion = ''
+        #         import random
+        #         i = 0
+        #         rand_number = random.randrange(len(self.keyword[1:-1]))
+        #         for w in self.keyword[1:-1]:
+        #             if  rand_number == i:
+        #                 suggestion += w
+        #             else:
+        #                 suggestion += '_'
+        #             i += 1
+                
+        #         # Create a cloze for anki
+        #         definition = oxford['definition']
+        #         example = oxford['example']
+        #         cloze = '{{c1::cloze}}'.replace('cloze', self.keyword)
+        #         suggestion = f'_{suggestion}_'
+        #         if example:
+        #             explanation = f'{definition}<br/>→ {example}'.lower().replace(self.keyword, cloze)
+        #         else:
+        #             explanation = f'{definition}'.lower().replace(self.keyword, cloze)
+                
+        #         return self.invoke(self.add_note_action, note=self.note_template(
+        #             deck_name,
+        #             model_name,
+        #             self.keyword,
+        #             self.g_translate(),
+        #             oxford['ipa'],
+        #             suggestion,
+        #             explanation,
+        #             full_vi,
+        #             oxford['audio'],
+        #             self.image_search()
+        #             ))
+        # else:
+        #     self.logger.info(f'Keyword: {self.keyword}| is existing in {deck_name} deck')
+        #     return True
+
+    def deck_check_and_add(self, deck_name):
+        query = f'"deck:{deck_name}"'
         deck = self.invoke(self.find_note_action, query=query)
         if not deck:
-            self.invoke(self.create_deck_action, deck=self.deck_name)
+            self.invoke(self.create_deck_action, deck=deck_name)
 
-    def find_note(self):
-        query = f'"deck:{self.deck_name}" AND "Keyword:{self.keyword}"'
+    def find_note(self, deck_name):
+        query = f'"deck:{deck_name}" AND "Keyword:{self.keyword}"'
         return self.invoke(self.find_note_action, query=query)
 
     @logit
     def image_search(self):
         if self.image_allow:
-            api_url = f'https://www.googleapis.com/customsearch/v1?key={self.google_api_key}&cx={self.google_project_cx}&searchType=image&fileType=jpg&imgSize=large&q={self.keyword}'
+            api_url = f'https://www.googleapis.com/customsearch/v1?key={self.config.get("GOOGLE_API_KEY")}&cx={self.config.get("GOOGLE_PROJECT_CX")}&searchType=image&fileType=jpg&imgSize=large&q={self.keyword}'
             response = self.session.get(api_url)
             try:
                 return response.json()['items'][0]['link']
@@ -132,7 +136,7 @@ class AnkiInput:
             json: The result of requesting anki API
         """
         requestJson = json.dumps({'action': action, 'params': params, 'version': 6}).encode('utf-8')
-        response = json.load(urllib.request.urlopen(urllib.request.Request('http://localhost:8765', requestJson)))
+        response = json.load(urllib.request.urlopen(urllib.request.Request(self.anki_api, requestJson)))
         if len(response) != 2:
             raise Exception('response has an unexpected number of fields')
         if 'error' not in response:
@@ -343,26 +347,6 @@ class AnkiInput:
         return logger
     
 
-if __name__ == '__main__':
-    """ 
-    The app to query API, crawl data and return all data to anki
-    """
-    with open('type.txt') as f:
-        anki_types = f.read()
-    anki_types = anki_types.split(',')
-    anki = AnkiInput(anki_types[0], anki_types[1], image_allow=False, debug=True)
-    logger = anki.logger
-
-    with open('english_words.txt') as f:
-        keywords = f.read()
-
-    keywords = keywords.split('\n')
-    for keyword in keywords:
-        anki.keyword = keyword.strip().lower()
-        if anki.send_to_anki():
-            logger.info(f'Keyword: {anki.keyword}| Complete to add {anki.keyword} into Anki!')
-        else:
-            logger.warning(f'Keyword: {anki.keyword}| Not complete to add into Anki!')
 
 
 
